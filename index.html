@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mullane studio</title>
+<meta name="description" content="mullane studio — Cities, Data, Design & Communities. Coming soon.">
+<meta property="og:title" content="mullane studio">
+<meta property="og:description" content="Cities, Data, Design & Communities — coming soon.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.mullanestudio.com/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12' fill='%235B5BF0'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js"></script>
+<style>
+  :root{
+    --ink:#17171B; --chalk:#F1F0EB; --iris:#5B5BF0;
+    --grey:#55555C;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{background:var(--chalk);overflow:hidden;
+       font-family:'Instrument Sans','Schibsted Grotesk',sans-serif}
+
+  /* ---- map ---- */
+  #map{position:fixed;inset:0}
+  #map canvas{cursor:grab}
+  #map canvas:active{cursor:grabbing}
+
+  /* soft chalk scrims so type reads over the basemap; clicks pass through */
+  .scrim{position:fixed;inset:0;pointer-events:none;z-index:2;
+    background:
+      linear-gradient(160deg, rgba(241,240,235,.92) 0%, rgba(241,240,235,.55) 26%, rgba(241,240,235,0) 52%),
+      linear-gradient(0deg, rgba(241,240,235,.85) 0%, rgba(241,240,235,0) 18%);}
+
+  /* ---- overlay ---- */
+  .overlay{position:fixed;inset:0;z-index:3;pointer-events:none;
+    display:flex;flex-direction:column;justify-content:space-between;
+    padding:clamp(24px,5vmin,64px)}
+
+  .wm{font-family:'Schibsted Grotesk',sans-serif;font-weight:500;
+      font-size:clamp(52px,9vw,116px);line-height:.85;letter-spacing:-.03em;
+      color:var(--iris)}
+  .tagline{margin-top:clamp(18px,3vmin,30px);
+      font-family:'Spline Sans Mono',monospace;font-size:clamp(11px,1.3vw,14px);
+      letter-spacing:.18em;text-transform:uppercase;color:var(--ink)}
+
+  .bottom{border-top:1.5px solid var(--ink);padding-top:12px;
+      display:flex;justify-content:space-between;gap:16px;
+      font-family:'Spline Sans Mono',monospace;font-size:clamp(10px,1.1vw,12px);
+      letter-spacing:.16em;text-transform:uppercase;color:var(--grey)}
+  .bottom .soon{color:var(--ink)}
+  .bottom .soon::before{content:"";display:inline-block;width:.72em;height:.72em;
+      border-radius:50%;background:var(--iris);margin-right:.8em;
+      vertical-align:baseline;
+      animation:pulse 2.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+  /* maplibre chrome, kept quiet */
+  .maplibregl-ctrl-attrib{font-family:'Spline Sans Mono',monospace;font-size:10px;
+      background:rgba(241,240,235,.8)!important;color:var(--grey)}
+  .maplibregl-ctrl-attrib a{color:var(--grey)}
+  .maplibregl-ctrl-bottom-right{z-index:4}
+
+  @media (max-width:600px){
+    .bottom{flex-direction:column;gap:6px}
+  }
+</style>
+</head>
+<body>
+
+<div id="map" aria-label="Interactive city basemap"></div>
+<div class="scrim"></div>
+
+<div class="overlay">
+  <header>
+    <h1 class="wm">mullane<br>studio.</h1>
+    <p class="tagline">Cities, Data, Design &amp; Communities</p>
+  </header>
+  <footer class="bottom">
+    <span class="soon">Coming soon</span>
+    <span id="cityline">&nbsp;</span>
+  </footer>
+</div>
+
+<script>
+(function(){
+  var CITIES=[
+    {name:"Melbourne",     c:[144.95,-37.95], z:9.2},
+    {name:"Shanghai",      c:[121.55, 31.20], z:8.8},
+    {name:"San Francisco", c:[-122.30, 37.72], z:9.0},
+    {name:"Brisbane",      c:[153.10,-27.42], z:9.2},
+    {name:"London",        c:[ -0.12, 51.50], z:9.0}
+  ];
+
+  // rotate through the cities, one per visit
+  var idx=Math.floor(Math.random()*CITIES.length);
+  try{
+    var k="ms_city_idx", prev=localStorage.getItem(k);
+    idx=prev===null?0:(parseInt(prev,10)+1)%CITIES.length;
+    localStorage.setItem(k,idx);
+  }catch(e){}
+  var city=CITIES[idx];
+
+  function fmt(c){
+    var lat=c[1], lon=c[0];
+    return Math.abs(lat).toFixed(2)+"°"+(lat<0?"S":"N")+" · "+
+           Math.abs(lon).toFixed(2)+"°"+(lon<0?"W":"E");
+  }
+  document.getElementById("cityline").textContent=city.name+" · "+fmt(city.c);
+
+  // ---- The Vizzie basemap: Vizzie's planet PMTiles, hand-styled with
+  // ---- Vizzie's light palette, all labels off. Falls back to a no-label
+  // ---- OpenFreeMap Positron if the tiles are unreachable.
+  var PM="https://pub-1ee30415ca43496abbc034bc48f48c5f.r2.dev/vizzie-planet-20260830.pmtiles";
+  var ATTR="Basemap © <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors · <a href=\"https://www.vizzie.org\">Vizzie</a>";
+
+  function vizzieStyle(){
+    return {
+      version:8,
+      sources:{ p:{ type:"vector", url:"pmtiles://"+PM, attribution:ATTR } },
+      layers:[
+        {id:"bg",type:"background",paint:{"background-color":"#ffffff"}},
+        {id:"earth",type:"fill",source:"p","source-layer":"earth",
+         paint:{"fill-color":"#ffffff"}},
+        {id:"landcover",type:"fill",source:"p","source-layer":"landcover",
+         paint:{"fill-color":"#fafafa"}},
+        {id:"landuse",type:"fill",source:"p","source-layer":"landuse",
+         paint:{"fill-color":"#f2f2f0","fill-opacity":0.7}},
+        {id:"water",type:"fill",source:"p","source-layer":"water",
+         paint:{"fill-color":"#dcdcdc"}},
+        {id:"roads-minor",type:"line",source:"p","source-layer":"roads",
+         paint:{"line-color":"#f0f0f0",
+                "line-width":["interpolate",["linear"],["zoom"],7,0.3,12,1.4]}},
+        {id:"roads-major",type:"line",source:"p","source-layer":"roads",
+         filter:["in",["get","kind"],["literal",["highway","major_road"]]],
+         paint:{"line-color":"#e6e6e6",
+                "line-width":["interpolate",["linear"],["zoom"],7,0.8,12,3]}},
+        {id:"buildings",type:"fill",source:"p","source-layer":"buildings",
+         minzoom:12,paint:{"fill-color":"#efefef"}},
+        {id:"boundaries",type:"line",source:"p","source-layer":"boundaries",
+         paint:{"line-color":"#adadad","line-width":0.8,"line-dasharray":[2,2]}}
+      ]
+    };
+  }
+
+  async function pickStyle(){
+    try{
+      // reachable (CORS-open) Vizzie tiles?
+      await fetch(PM,{headers:{Range:"bytes=0-127"}});
+      return vizzieStyle();
+    }catch(e){
+      // fallback: OpenFreeMap Positron with every label layer stripped
+      var s=await (await fetch("https://tiles.openfreemap.org/styles/positron")).json();
+      s.layers=s.layers.filter(function(l){
+        if(l.type==="symbol") return false;
+        var p=l.paint||{};
+        return !(p["fill-pattern"]||p["line-pattern"]||p["background-pattern"]);
+      });
+      delete s.glyphs; delete s.sprite;
+      return s;
+    }
+  }
+
+  (async function(){
+    try{
+      maplibregl.addProtocol("pmtiles", new pmtiles.Protocol().tile);
+      var map=new maplibregl.Map({
+        container:"map",
+        style: await pickStyle(),
+        center:city.c,
+        zoom:city.z,
+        minZoom:3,
+        maxZoom:15.5,
+        pitchWithRotate:false,
+        attributionControl:{compact:true}
+      });
+      map.touchZoomRotate.disableRotation();
+      map.dragRotate.disable();
+      map.on("load",function(){ map.resize(); map.triggerRepaint(); });
+      document.addEventListener("visibilitychange",function(){
+        if(!document.hidden){ map.resize(); map.triggerRepaint(); }
+      });
+      map.on("moveend",function(){
+        var c=map.getCenter();
+        document.getElementById("cityline").textContent=
+          city.name+" · "+fmt([c.lng,c.lat]);
+      });
+    }catch(e){ /* offline: the chalk ground carries the page */ }
+  })();
+})();
+</script>
+
+</body>
+</html>
