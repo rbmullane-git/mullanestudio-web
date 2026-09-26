@@ -60,14 +60,23 @@
       animation:pulse 2.6s ease-in-out infinite}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 
+  .bottom .contact{color:var(--ink);text-decoration:none;pointer-events:auto;
+      border-bottom:1px solid rgba(23,23,27,.3);padding-bottom:2px;
+      transition:color .18s ease,border-color .18s ease}
+  .bottom .contact:hover{color:var(--iris);border-color:var(--iris)}
+  .bottom .contact:focus-visible{color:var(--iris);border-color:transparent;
+      outline:2px solid var(--iris);outline-offset:3px}
+
   /* maplibre chrome, kept quiet */
   .maplibregl-ctrl-attrib{font-family:'Spline Sans Mono',monospace;font-size:10px;
       background:rgba(241,240,235,.8)!important;color:var(--grey)}
   .maplibregl-ctrl-attrib a{color:var(--grey)}
   .maplibregl-ctrl-bottom-right{z-index:4}
 
-  @media (max-width:600px){
+  @media (max-width:760px){
     .bottom{flex-direction:column;gap:6px}
+    /* stacked: keep the underline hugging the text, not the full column width */
+    .bottom .contact{align-self:flex-start}
   }
 </style>
 </head>
@@ -83,6 +92,7 @@
   </header>
   <footer class="bottom">
     <span class="soon">Coming soon</span>
+    <a class="contact" href="mailto:hello@mullanestudio.com">hello@mullanestudio.com</a>
     <span id="cityline">&nbsp;</span>
   </footer>
 </div>
